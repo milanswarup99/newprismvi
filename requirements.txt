@@ -6,3 +6,8 @@ exifread
 opencv-python-headless
 numpy
 pillow
+scikit-image
+scikit-learn
+joblib
+pandas
+matplotlib
