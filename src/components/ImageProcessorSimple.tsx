@@ -39,7 +39,6 @@ import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
 
-
 const ImageProcessor: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [originalImage, setOriginalImage] = useState<string>('');
@@ -53,6 +52,7 @@ const ImageProcessor: React.FC = () => {
   const [showSatisfactionDialog, setShowSatisfactionDialog] = useState<boolean>(false);
   const [satisfactionRating, setSatisfactionRating] = useState<number>(5);
   const [lastProcessedImage, setLastProcessedImage] = useState<string>('');
+  const [predictedLevel, setPredictedLevel] = useState<number>(5);
 
   // Theme configuration
   const theme = createTheme({
@@ -75,7 +75,6 @@ const ImageProcessor: React.FC = () => {
   useEffect(() => {
     const fetchKPI = async () => {
       try {
-        // Use environment variable or fallback to localhost
         const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
         const response = await axios.get(`${API_BASE_URL}/api/kpi-data`);
         setKpiData(response.data);
@@ -102,6 +101,41 @@ const ImageProcessor: React.FC = () => {
       setSatisfactionRating(5);
     } catch (err) {
       console.error('Failed to submit satisfaction:', err);
+    }
+  };
+
+  const handleAutoEnhance = async () => {
+    if (!selectedFile) return;
+
+    setIsProcessing(true);
+    setError('');
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
+      const response = await axios.post(`${API_BASE_URL}/api/auto-enhance-dng`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (response.data.success) {
+        setOriginalImage(response.data.original_image);
+        setProcessedImage(response.data.enhanced_image);
+        setLastProcessedImage(response.data.enhanced_image);
+        setMetadata(response.data);
+        setPredictedLevel(response.data.predicted_level);
+        setSaturationLevel(response.data.predicted_level); // Update slider dynamically
+        setShowSatisfactionDialog(true);
+      } else {
+        setError('Auto-enhancement failed');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Auto-enhancement failed');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -348,8 +382,21 @@ const ImageProcessor: React.FC = () => {
               onClick={handleProcessImage}
               disabled={!selectedFile || isProcessing}
               fullWidth
+              sx={{ mb: 2 }}
             >
               {isProcessing ? 'Processing...' : 'Apply Enhancement'}
+            </Button>
+
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<AutoFixHigh />}
+              onClick={handleAutoEnhance}
+              disabled={!selectedFile || isProcessing}
+              fullWidth
+              color="secondary"
+            >
+              {isProcessing ? 'Processing...' : 'Auto Enhancement (AI)'}
             </Button>
 
             {isProcessing && (
@@ -395,14 +442,14 @@ const ImageProcessor: React.FC = () => {
               <Card>
                 <CardContent>
                   <Typography variant="subtitle1" gutterBottom>
-                    Enhanced (Level {saturationLevel})
+                    Enhanced
                   </Typography>
                 </CardContent>
                 {processedImage ? (
                   <CardMedia
                     component="img"
                     image={processedImage}
-                    alt="Processed"
+                    alt="Enhanced"
                     sx={{ height: 300, objectFit: 'contain' }}
                   />
                 ) : (
@@ -475,27 +522,35 @@ const ImageProcessor: React.FC = () => {
               </Box>
               <Box sx={{ flex: '1 1 200px', minWidth: '200px' }}>
                 <Typography variant="body2" color="text.secondary">
-                  ISO
+                  Enhancement Level
                 </Typography>
                 <Typography variant="body1">
-                  {metadata.metadata?.['EXIF ISOSpeedRatings'] || 'N/A'}
+                  {metadata.enhancement_level}
                 </Typography>
               </Box>
-              <Box sx={{ flex: '1 1 200px', minWidth: '200px' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Image Size
-                </Typography>
-                <Typography variant="body1">
-                  {metadata.metadata?.visible_width}x{metadata.metadata?.visible_height}
-                </Typography>
-              </Box>
+              {metadata.predicted_level && (
+                <Box sx={{ flex: '1 1 200px', minWidth: '200px' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    AI Predicted Level
+                  </Typography>
+                  <Typography variant="body1" color="secondary.main" sx={{ fontWeight: 'bold' }}>
+                    {metadata.predicted_level}
+                  </Typography>
+                </Box>
+              )}
+              {metadata.message && (
+                <Box sx={{ flex: '1 1 200px', minWidth: '200px' }}>
+                  <Typography variant="body2" color="success.main" sx={{ fontWeight: 'bold' }}>
+                    {metadata.message}
+                  </Typography>
+                </Box>
+              )}
             </Box>
-
-            <Box sx={{ mt: 2 }}>
+            
+            <Box sx={{ mt: 3, textAlign: 'center' }}>
               <Button
-                variant="outlined"
+                variant="contained"
                 startIcon={<Download />}
-                size="small"
                 onClick={() => {
                   const link = document.createElement('a');
                   link.href = processedImage;
@@ -509,7 +564,6 @@ const ImageProcessor: React.FC = () => {
           </Paper>
         </Box>
       )}
-    </Container>
 
       {/* Satisfaction Dialog */}
       <Dialog 
@@ -564,6 +618,7 @@ const ImageProcessor: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      </Container>
     </ThemeProvider>
   );
 };

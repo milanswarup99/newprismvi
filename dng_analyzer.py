@@ -8,10 +8,20 @@ import os
 import glob
 import sys
 from pathlib import Path
+import joblib
+from skimage.color import rgb2lab, deltaE_ciede2000
+
+try:
+    model = joblib.load(
+        "saturation_model.pkl"
+    )
+except Exception as e:
+    print(f"Error loading model: {e}")
+    model = None
 
 def check_dependencies():
     """Check if required packages are installed"""
-    required_packages = ['rawpy', 'exifread', 'pandas', 'numpy', 'cv2', 'matplotlib']
+    required_packages = ['rawpy', 'exifread', 'pandas', 'numpy', 'cv2', 'matplotlib', 'scikit-image', 'scikit-learn', 'joblib']
     missing_packages = []
     
     for package in required_packages:
@@ -52,6 +62,56 @@ def find_dng_files():
             dng_files.extend(glob.glob(pattern))
     
     return dng_files
+    
+def predict_saturation_level(rgb16, raw):
+    """Predict saturation level using ML model"""
+
+    if model is None:
+        return -1
+    # Normalize image
+    rgb_norm = rgb16.astype(np.float32) / 65535.0
+    # Convert to LAB
+    lab = rgb2lab(rgb_norm)
+    a = lab[:, :, 1]
+    b = lab[:, :, 2]
+    # Chroma
+    chroma = np.sqrt(a**2 + b**2)
+    mean_chroma = np.mean(chroma)
+    # Slightly boosted reference image
+    rgb_ref = np.clip(rgb_norm * 1.05, 0, 1)
+    lab_ref = rgb2lab(rgb_ref)
+
+    # Delta E
+    deltaE = np.mean(deltaE_ciede2000(lab, lab_ref))
+
+    # Safe white balance extraction
+    wb = list(raw.camera_whitebalance)
+
+    while len(wb) < 4:
+        wb.append(0)
+
+    # Safe black level extraction
+    bl = list(raw.black_level_per_channel)
+
+    while len(bl) < 4:
+        bl.append(0)
+
+    feature_vector = [[
+        bl[0],
+        bl[1],
+        bl[2],
+        bl[3],
+        raw.white_level,
+        wb[0],
+        wb[1],
+        wb[2],
+        wb[3],
+        mean_chroma,
+        deltaE
+    ]]
+
+    predicted_level = model.predict(feature_vector)[0]
+    return int(predicted_level)
 
 def analyze_single_dng(dng_path):
     """Analyze a single DNG file"""
@@ -125,6 +185,15 @@ def analyze_single_dng(dng_path):
             metadata['SATURATION_MAX'] = max_sat
             metadata['SATURATION_MIN'] = min_sat
             
+            # Add ML prediction
+            predicted_level = predict_saturation_level(
+                rgb16,
+                raw
+            )
+
+            print(f"ML Predicted Level: {predicted_level}")
+
+            metadata['ML_PREDICTED_LEVEL'] = predicted_level
     except Exception as e:
         print(f"Error processing raw image: {e}")
         return None
